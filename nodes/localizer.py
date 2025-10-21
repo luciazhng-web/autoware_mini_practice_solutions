@@ -53,11 +53,6 @@ class Localizer:
 
     def transform_coordinates(self, msg):
 
-        if rospy.is_shutdown():
-            return
-
-        print(f'Before transformation: {msg.latitude}, {msg.longitude}')
-        
         # calculate position
         utm_x, utm_y = self.transformer.transform(msg.latitude, msg.longitude)
         p_x = utm_x - self.origin_x
@@ -65,7 +60,8 @@ class Localizer:
         p_z = msg.height - self.undulation
         
         # calculate azimuth correction
-        azimuth_correction = self.utm_projection.get_factors(msg.longitude, msg.latitude).meridian_convergence # True north - grid north
+        azimuth_correction_degree = self.utm_projection.get_factors(msg.longitude, msg.latitude).meridian_convergence # True north - grid north
+        azimuth_correction = math.radians(azimuth_correction_degree) #convert to radians
         azimuth_radians = math.radians(msg.azimuth)
         corrected_azimuth = azimuth_radians - azimuth_correction
         yaw = convert_azimuth_to_yaw(corrected_azimuth)
@@ -108,9 +104,6 @@ class Localizer:
 
         # publish transform
         self.br.sendTransform(t)
-
-
-        print(f'After transformation: x: {p_x}, y: {p_y}')
 
     def run(self):
         rospy.spin()
