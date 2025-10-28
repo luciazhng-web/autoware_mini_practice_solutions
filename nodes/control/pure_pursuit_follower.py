@@ -36,6 +36,13 @@ class PurePursuitFollower:
         # receives local path to be followed
         self.path = msg
 
+        if not msg.waypoints:
+            rospy.loginfo("Follower received an empty path from global planner. Stopping vehicle and clearing state.")
+            self.path = None # Clear path message
+            self.path_linestring = None # Clear shapely object
+            self.distance_to_velocity_interpolator = None # Clear interpolator
+            return
+
         # convert waypoints to shapely linestring
         self.path_linestring = LineString([(w.position.x, w.position.y) for w in msg.waypoints])
         # prepare path - creates spatial tree, making the spatial queries more efficient
@@ -54,12 +61,14 @@ class PurePursuitFollower:
 
         # create interpolator
         try:
+            vel_fill = (velocities[0], 0.0)
+            
             self.distance_to_velocity_interpolator = interp1d(
                 distances, 
                 velocities, 
                 kind='linear', 
                 bounds_error=False, 
-                fill_value=0.0
+                fill_value=vel_fill
             )
             rospy.loginfo(f"Received a new path with {len(self.path.waypoints)} waypoints. Velocity interpolator created.")
         except ValueError as e:
@@ -71,14 +80,13 @@ class PurePursuitFollower:
         self.current_pose = msg
         
         if self.path_linestring is None or self.distance_to_velocity_interpolator is None:
-            return 
-
-        #x = msg.pose.position.x
-        #y = msg.pose.position.y
-        #z = msg.pose.position.z
-        #orientation = msg.pose.orientation
-
-        #rospy.loginfo(f'/bicycle_simulation- initial position ({x},{y},{z}) orientation ({orientation}) in map frame.')
+            vehicle_cmd = VehicleCmd()
+            vehicle_cmd.header.stamp = rospy.Time.now()
+            vehicle_cmd.ctrl_cmd.linear_velocity = 0.0
+            vehicle_cmd.ctrl_cmd.steering_angle = 0.0 
+            
+            self.vehicle_cmd_pub.publish(vehicle_cmd)
+            return
 
         # current position and projected position to path(trajectory)
         current_pose = Point([msg.pose.position.x, msg.pose.position.y])
@@ -92,10 +100,18 @@ class PurePursuitFollower:
         lookahead_point = self.path_linestring.interpolate(d_ego_to_point)
         ld = distance(current_pose, lookahead_point)
 
+        if lookahead_point is None:
+            vehicle_cmd = VehicleCmd()
+            vehicle_cmd.header.stamp = rospy.Time.now()
+            vehicle_cmd.ctrl_cmd.linear_velocity = 0.0
+            vehicle_cmd.ctrl_cmd.steering_angle = 0.0 
+            
+            self.vehicle_cmd_pub.publish(vehicle_cmd)
+            return
+
         # lookahead point heading calculation
         lookahead_heading = np.arctan2(lookahead_point.y - current_pose.y, lookahead_point.x - current_pose.x) #map reference
         alpha = lookahead_heading - heading
-        alpha = np.arctan2(np.sin(alpha), np.cos(alpha))
                 
         # calculate steer angle
         steering_angle = np.arctan2(2*self.wheel_base*np.sin(alpha), ld)
@@ -116,8 +132,6 @@ class PurePursuitFollower:
         # Publish command
         self.vehicle_cmd_pub.publish(vehicle_cmd)
         
-        rospy.loginfo(f'Ego Distance from Path Start: {d_ego_from_path_start:.2f} meters, with speed: {velocity: .2f} and steering_angle: {steering_angle: .2f}')
-
     def run(self):
         rospy.spin()
 
