@@ -5,16 +5,18 @@ import itertools
 import shapely
 import rospy
 import lanelet2
+import copy
 
 from lanelet2.io import Origin, load
 from lanelet2.projection import UtmProjector
 from lanelet2.core import BasicPoint2d
 from lanelet2.geometry import findNearest
 
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Pose
 from autoware_mini.lanelet2 import load_lanelet2_map
 from autoware_mini.msg import Waypoint, Path
 from shapely.geometry import LineString, Point
+from shapely.ops import substring
 
 class Lanelet2GlobalPlanner:
 
@@ -77,14 +79,42 @@ class Lanelet2GlobalPlanner:
 
         rospy.loginfo(f"path_no_lane_change: {path_no_lane_change}")
 
-        waypoints = self.convert_to_waypoints(path_no_lane_change, route)
+        waypoints = self.convert_to_waypoints(path_no_lane_change)
+
         if waypoints is None:
             rospy.logerr("%s - route contained an impossible lane change!", rospy.get_name())
             return
+            
+        # Convert waypoints to Shapely LineString
+        full_path = LineString([(w.position.x, w.position.y) for w in waypoints])
 
-        self.publish_waypoints(waypoints)
+        # Convert both current pose and goal point to Shapely Points
+        start_p = shapely.Point(self.current_pose.pose.position.x, self.current_pose.pose.position.y)
+        goal_p = shapely.Point(msg.pose.position.x, msg.pose.position.y)
+        
+        # Project the start point and goal point to the global path
+        start_dis = full_path.project(start_p)
+        goal_dis = full_path.project(goal_p)
+        start_on_path = full_path.interpolate(start_dis)
+        goal_on_path = full_path.interpolate(goal_dis)
+        
+        # Get the updated path
+        selected_waypoints = []
+        for w in waypoints:
+            wp_dis = full_path.project(Point(w.position.x, w.position.y))
+            if start_dis <= wp_dis <= goal_dis:
+                selected_waypoints.append(w)
+        
+        # Update the last waypoint
+        last_wp = selected_waypoints[-1]
+        new_wp = copy.deepcopy(last_wp)
+        new_wp.position.x = goal_on_path.x
+        new_wp.position.y = goal_on_path.y
+        selected_waypoints.append(new_wp)
 
-    def convert_to_waypoints(self, lanelet_sequence, route):
+        self.publish_waypoints(selected_waypoints)
+
+    def convert_to_waypoints(self, lanelet_sequence):
 
         waypoints = []
         last_lanelet = False
