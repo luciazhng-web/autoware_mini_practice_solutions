@@ -3,4 +3,4 @@ Solution - Create a new waypoint - the closest point on the path to the user-sel
 The main idea is to extra part of the existing (full) waypoints(path):
 1. Project the goal point to the current full path, it will return an accumulated distance goal_dis
 2. Extract the new goal point projected on the path via interpolate function
-3. Select the path within the distance of goal_dis, that will be the final output path 
+3. Select the path within the distance of goal_dis, plus with the goal point, will be the final output path
