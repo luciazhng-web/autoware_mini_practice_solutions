@@ -71,7 +71,7 @@ class SpeedPlanner:
             
             closest_object_distance = 0.0
             closest_object_velocity = 0.0
-            #stopping_point_distance = 0.0
+            stopping_point_distance = 0.0
 
             # extract collision point distance on local path
             local_path = PathWrapper(local_path_msg.waypoints)
@@ -79,7 +79,7 @@ class SpeedPlanner:
             collision_points_shapely = shapely.points(structured_to_unstructured(collision_points[['x', 'y', 'z']]))
             collision_point_distances = np.array([local_path_linestring.project(collision_point_shapely) for collision_point_shapely in collision_points_shapely])
             
-            ego_distance_localpath = local_path_linestring.project(current_position)
+            ego_distance_localpath = local_path_linestring.project(current_position) # it's uncessary alway 0
 
             # get distance_to_stop per collision obstacle
             distance_to_stop = collision_points['distance_to_stop']
@@ -95,7 +95,7 @@ class SpeedPlanner:
             safe_distances = self.braking_reaction_time *abs(collision_point_velocities)
 
             # calculate deceleration distance
-            deceleration_distances = np.maximum(0,collision_point_distances - ego_distance_localpath - self.distance_to_car_front - distance_to_stop - safe_distances)
+            deceleration_distances = np.maximum(0,collision_point_distances - self.distance_to_car_front - distance_to_stop - safe_distances)
 
             # calculate target speed
             deceleration_speeds = np.sqrt(np.maximum(0, collision_point_velocities**2 + 2*self.default_deceleration * deceleration_distances))
@@ -103,7 +103,8 @@ class SpeedPlanner:
             # obtain the lowest target velocity
             target_velocity = min(deceleration_speeds)
             min_value_index = np.argmin(deceleration_speeds)
-            closest_object_distance = deceleration_distances[min_value_index]
+            closest_object_distance = deceleration_distances[min_value_index] + self.distance_to_car_front
+            stopping_point_distance = safe_distances[min_value_index] + deceleration_distances[min_value_index] + self.distance_to_car_front
             collision_point_category = collision_points[min_value_index]["category"]
             closest_object_velocity = collision_point_velocities[min_value_index]
 
@@ -117,7 +118,7 @@ class SpeedPlanner:
             path.closest_object_distance = closest_object_distance # Distance to the collision point with lowest target velocity (also closest object for now)
             path.closest_object_velocity = closest_object_velocity # Velocity of the collision point with lowest target velocity (0)
             path.is_blocked = True
-            path.stopping_point_distance = closest_object_distance # Stopping point distance can be set to the distance to the closest object for now
+            path.stopping_point_distance = stopping_point_distance # Stopping point distance can be set to the distance to the closest object for now
             path.collision_point_category = collision_point_category # Category of collision point with lowest target velocity
             self.local_path_pub.publish(path)
 
